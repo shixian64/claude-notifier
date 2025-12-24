@@ -48,26 +48,15 @@ cd claude-notifier
 
 ### 2. 安装
 
-**默认安装**（推荐，安装到 `~/.claude/apps/`）：
-
 ```bash
+# 默认安装到 ~/.claude/apps/（推荐）
 make install
-```
 
-**自定义安装路径**：
-
-```bash
-# 安装到 /Applications
+# 或安装到 /Applications（系统级）
 make install PREFIX=/Applications
-
-# 安装到 ~/Applications
-make install PREFIX=~/Applications
-
-# 安装到任意目录
-make install PREFIX=/your/custom/path
 ```
 
-> **注意**：如果使用自定义路径，后续 Hooks 配置中的 `ClaudeNotifier` 路径也需要相应修改。
+> **提示**：后续示例统一使用默认路径 `~/.claude/apps/`，如安装到其他位置请自行替换。
 
 ### 3. 授权通知权限
 
@@ -167,29 +156,9 @@ afconvert input.mp3 output.aiff -d LEI16
 
 Claude Code 支持通过 Hooks 在特定事件触发时执行自定义脚本。我们使用 `Stop` hook 在 Claude 完成回答时发送通知。
 
-### 方式一：使用 settings.json 配置（推荐）
+### 基础配置（推荐）
 
-编辑 Claude Code 配置文件 `~/.claude/settings.json`：
-
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/.claude/apps/ClaudeNotifier.app/Contents/MacOS/ClaudeNotifier -t 'Claude Code' -m 'Claude 已完成回答'"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-**使用自定义音效**：
+编辑 `~/.claude/settings.json`：
 
 ```json
 {
@@ -209,39 +178,84 @@ Claude Code 支持通过 Hooks 在特定事件触发时执行自定义脚本。�
 }
 ```
 
-### 方式二：使用 Shell 脚本
+> 如不需要自定义音效，删除 `-f '$HOME/.claude/sounds/done.aiff'` 部分即可使用默认系统声音。
 
-**Step 1**: 创建 hook 脚本
+### 高级配置：带任务检查（TypeScript）
 
-```bash
-mkdir -p ~/.claude/hooks
-cat > ~/.claude/hooks/stop.sh << 'EOF'
-#!/bin/bash
-# Claude Code Stop Hook - 任务完成时发送通知
+如果希望在 Todo 列表未清空时阻止 Claude 结束，可使用带检查逻辑的脚本：
 
-NOTIFIER="$HOME/.claude/apps/ClaudeNotifier.app/Contents/MacOS/ClaudeNotifier"
-SOUND_FILE="$HOME/.claude/sounds/done.aiff"
+**Step 1**: 创建 hook 脚本 `~/.claude/hooks/stop-check.ts`
 
-send_notification() {
-    local title="Claude Code"
-    local message="Claude 已完成回答"
+```typescript
+#!/usr/bin/env npx tsx
+import { existsSync, readFileSync, accessSync, constants } from "fs";
+import { homedir } from "os";
+import { join } from "path";
+import { spawnSync } from "child_process";
 
-    if [[ -x "$NOTIFIER" ]]; then
-        "$NOTIFIER" -t "$title" -m "$message" -f "$SOUND_FILE" 2>/dev/null || \
-        "$NOTIFIER" -t "$title" -m "$message" 2>/dev/null || \
-        osascript -e "display notification \"$message\" with title \"$title\" sound name \"Glass\"" 2>/dev/null || true
-    else
-        osascript -e "display notification \"$message\" with title \"$title\" sound name \"Glass\"" 2>/dev/null || true
-    fi
+const GREEN = "\x1b[0;32m",
+  YELLOW = "\x1b[1;33m",
+  NC = "\x1b[0m";
+const logInfo = (msg: string) =>
+  console.error(`${GREEN}[STOP-CHECK]${NC} ${msg}`);
+const logWarn = (msg: string) =>
+  console.error(`${YELLOW}[STOP-CHECK]${NC} ${msg}`);
+
+interface Todo {
+  status: "pending" | "in_progress" | "completed";
 }
 
-send_notification
-EOF
+function sendNotification(): void {
+  const notifier = join(
+    homedir(),
+    ".claude/apps/ClaudeNotifier.app/Contents/MacOS/ClaudeNotifier",
+  );
+  const soundFile = join(homedir(), ".claude/sounds/done.aiff");
+  try {
+    accessSync(notifier, constants.X_OK);
+    spawnSync(
+      notifier,
+      ["-t", "Claude Code", "-m", "Claude 已完成回答", "-f", soundFile],
+      { stdio: "ignore" },
+    );
+  } catch {
+    /* 静默跳过 */
+  }
+}
 
-chmod +x ~/.claude/hooks/stop.sh
+function checkTodos(): { passed: boolean; reason?: string } {
+  const todoFile = join(homedir(), ".claude/todos.json");
+  if (!existsSync(todoFile)) return { passed: true };
+  try {
+    const todos: Todo[] = JSON.parse(readFileSync(todoFile, "utf-8"));
+    const inProgress = todos.filter((t) => t.status === "in_progress").length;
+    const pending = todos.filter((t) => t.status === "pending").length;
+    if (inProgress > 0) {
+      logWarn(`发现 ${inProgress} 个进行中的任务`);
+      return { passed: false, reason: "仍有未完成的任务" };
+    }
+    if (pending > 0) {
+      logWarn(`发现 ${pending} 个待处理的任务`);
+      return { passed: false, reason: "仍有未完成的任务" };
+    }
+    return { passed: true };
+  } catch {
+    return { passed: true };
+  }
+}
+
+const result = checkTodos();
+if (!result.passed) {
+  logWarn(`阻止结束: ${result.reason}`);
+  console.log(JSON.stringify({ decision: "block", reason: result.reason }));
+} else {
+  logInfo("任务检查通过，允许结束");
+  sendNotification();
+  console.log(JSON.stringify({ decision: "approve" }));
+}
 ```
 
-**Step 2**: 在 settings.json 中注册 hook
+**Step 2**: 在 settings.json 中注册
 
 ```json
 {
@@ -252,7 +266,8 @@ chmod +x ~/.claude/hooks/stop.sh
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/.claude/hooks/stop.sh"
+            "command": "npx tsx $HOME/.claude/hooks/stop-check.ts",
+            "timeout": 10
           }
         ]
       }
@@ -261,48 +276,7 @@ chmod +x ~/.claude/hooks/stop.sh
 }
 ```
 
-### 方式三：带任务检查的高级 Hook
-
-如果你希望在任务未完成时阻止 Claude 结束（例如 Todo 列表未清空），可以使用带检查逻辑的 hook：
-
-```bash
-cat > ~/.claude/hooks/stop-check.sh << 'EOF'
-#!/bin/bash
-set -euo pipefail
-
-NOTIFIER="$HOME/.claude/apps/ClaudeNotifier.app/Contents/MacOS/ClaudeNotifier"
-
-send_notification() {
-    local title="Claude Code"
-    local message="Claude 已完成回答"
-
-    if [[ -x "$NOTIFIER" ]]; then
-        "$NOTIFIER" -t "$title" -m "$message" 2>/dev/null || true
-    fi
-}
-
-# 检查是否有未完成的任务
-check_todos() {
-    local todo_file="$HOME/.claude/todos.json"
-    if [[ -f "$todo_file" ]]; then
-        if grep -q '"status"[[:space:]]*:[[:space:]]*"in_progress"' "$todo_file" 2>/dev/null; then
-            return 1
-        fi
-    fi
-    return 0
-}
-
-# 主逻辑
-if check_todos; then
-    send_notification
-    echo '{"decision": "approve"}'
-else
-    echo '{"decision": "block", "reason": "仍有未完成的任务"}'
-fi
-EOF
-
-chmod +x ~/.claude/hooks/stop-check.sh
-```
+> **依赖**：需要全局安装 tsx (`npm i -g tsx`) 或使用 npx 运行。
 
 ### 创建自定义语音音效
 
@@ -331,21 +305,17 @@ say -v Meijia "任务完成" -o ~/.claude/sounds/done.aiff
 
 ## 手动安装
 
-```bash
-# 1. 编译
-swiftc -O -o ClaudeNotifier src/ClaudeNotifier.swift
+如不使用 Makefile，可手动执行以下步骤：
 
-# 2. 创建 App Bundle
+```bash
+# 编译 → 创建 App Bundle → 签名 → 注册
+swiftc -O -o ClaudeNotifier src/ClaudeNotifier.swift
 mkdir -p ~/.claude/apps/ClaudeNotifier.app/Contents/{MacOS,Resources}
 cp ClaudeNotifier ~/.claude/apps/ClaudeNotifier.app/Contents/MacOS/
 cp resources/Info.plist ~/.claude/apps/ClaudeNotifier.app/Contents/
 cp resources/AppIcon.icns ~/.claude/apps/ClaudeNotifier.app/Contents/Resources/
-
-# 3. 签名
 codesign --force --deep --sign - ~/.claude/apps/ClaudeNotifier.app
-
-# 4. 注册到 LaunchServices
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f ~/.claude/apps/ClaudeNotifier.app
+lsregister -f ~/.claude/apps/ClaudeNotifier.app
 ```
 
 ## 技术细节
@@ -375,30 +345,26 @@ claude-notifier/
 ├── sounds/                     # 示例音效目录
 │   └── .gitkeep
 └── examples/
-    └── stop-check.sh           # Hook 集成示例
+    └── stop-check.ts           # Hook 集成示例 (TypeScript)
+```
+
+## 卸载
+
+```bash
+# 默认路径
+make uninstall
+
+# 自定义路径
+make uninstall PREFIX=/Applications
 ```
 
 ## 常见问题
 
-### 通知不显示？
-
-1. 检查「系统设置 → 通知 → Claude Notifier」是否允许
-2. 重新注册应用：`lsregister -f ~/.claude/apps/ClaudeNotifier.app`
-
-### 自定义音效不响？
-
-1. 确认音效时长 < 30 秒
-2. 确认格式为 `.aiff`（推荐）或 `.wav`
-3. 检查 `~/Library/Sounds/` 目录是否有对应文件
-
-### 图标显示为默认？
-
-重新签名并注册：
-
-```bash
-codesign --force --deep --sign - ~/.claude/apps/ClaudeNotifier.app
-lsregister -f ~/.claude/apps/ClaudeNotifier.app
-```
+| 问题           | 解决方案                                                                            |
+| -------------- | ----------------------------------------------------------------------------------- |
+| 通知不显示     | 检查「系统设置 → 通知 → ClaudeNotifier」是否允许                                    |
+| 图标显示异常   | 重新签名：`codesign --force --deep --sign - <app路径>` 后 `lsregister -f <app路径>` |
+| 自定义音效不响 | 确认格式为 `.aiff`、时长 < 30 秒、已复制到 `~/Library/Sounds/`                      |
 
 ## License
 
