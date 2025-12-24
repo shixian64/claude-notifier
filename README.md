@@ -62,9 +62,38 @@ cargo build --release
 
 ## Claude Code Hooks 配置
 
-### macOS
+推荐使用 TypeScript Hook 统一管理通知（桌面 + 远程并行执行）：
 
-编辑 `~/.claude/settings.json`：
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx tsx ~/.claude/hooks/stop-check.ts"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Hook 功能：
+
+- 检查 TodoList 是否全部完成（未完成则阻止结束）
+- 发送桌面通知（ClaudeNotifier.app）
+- 发送远程推送（ntfy/Telegram/Bark，只启用一个）
+- 桌面和远程通知并行执行，不阻塞
+
+### 仅桌面通知（简化版）
+
+如果只需要桌面通知，可直接调用：
+
+**macOS**:
 
 ```json
 {
@@ -84,9 +113,7 @@ cargo build --release
 }
 ```
 
-### Windows
-
-编辑 `%USERPROFILE%\.claude\settings.json`：
+**Windows**:
 
 ```json
 {
@@ -113,10 +140,6 @@ claude-notifier/
 ├── README.md                    # 本文档（项目总览）
 ├── LICENSE                      # MIT 许可证
 ├── .github/workflows/           # GitHub Actions CI
-├── config/                      # 配置文件模板
-│   └── notifier.example.toml    # 多渠道推送配置示例
-├── scripts/                     # 跨平台脚本
-│   └── notify-remote.sh         # 远程推送脚本
 ├── images/                      # 文档图片（共用）
 ├── examples/                    # Hook 示例脚本（共用）
 ├── sounds/                      # 音效文件目录（共用）
@@ -143,55 +166,53 @@ claude-notifier/
         └── install.ps1
 ```
 
-## 多渠道推送（实验性）
+## 多渠道推送
 
-除了桌面通知，还支持推送到手机和 IM 工具：
+除了桌面通知，还支持推送到手机和 IM 工具（**只能启用一个远程渠道**）：
 
-| 渠道     | 平台        | 状态    |
-| -------- | ----------- | ------- |
-| ntfy.sh  | iOS/Android | ✅ 可用 |
-| Telegram | 全平台      | ✅ 可用 |
-| Bark     | iOS         | ✅ 可用 |
-| 飞书     | 企业微信    | ✅ 可用 |
-| 钉钉     | 企业微信    | ✅ 可用 |
-| 企业微信 | 企业微信    | ✅ 可用 |
+| 渠道     | 平台        | 状态      |
+| -------- | ----------- | --------- |
+| ntfy.sh  | iOS/Android | ✅ 已测试 |
+| Telegram | 全平台      | ✅ 已测试 |
+| Bark     | iOS         | ✅ 已测试 |
+| 飞书     | 企业        | 🔧 待测试 |
+| 钉钉     | 企业        | 🔧 待测试 |
+| 企业微信 | 企业        | 🔧 待测试 |
 
-### 快速体验（ntfy 推荐）
+### 架构说明
 
-```bash
-# 1. 手机安装 ntfy App（iOS/Android 均可）
-# 2. 订阅主题，如: claude-你的用户名
+- **桌面通知**：调用 ClaudeNotifier.app（Swift/Rust 原生实现）
+- **远程推送**：TypeScript Hook 内置实现（无需 shell 脚本）
+- **执行方式**：桌面通知与远程推送**并行执行**
+- **渠道互斥**：远程推送只启用一个渠道（ntfy > Telegram > Bark 优先级）
 
-# 3. 配置并测试
-mkdir -p ~/.config/claude-notifier
-cp config/notifier.example.toml ~/.config/claude-notifier/notifier.toml
-# 编辑配置文件，设置 [ntfy] enabled = true
+### 快速配置
 
-# 4. 测试推送
-./scripts/notify-remote.sh -t "测试" -m "推送成功！"
-```
-
-### Hook 配置（桌面+远程）
+在 `~/.claude/settings.json` 的 `env` 字段中配置环境变量：
 
 ```json
 {
-  "hooks": {
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/.claude/apps/ClaudeNotifier.app/Contents/MacOS/ClaudeNotifier -t 'Claude Code' -m 'Claude 已完成回答' && $HOME/.claude/repos/claude-notifier/scripts/notify-remote.sh -t 'Claude Code' -m 'Claude 已完成回答'"
-          }
-        ]
-      }
-    ]
+  "env": {
+    "CLAUDE_NOTIFY_CHANNEL": "bark",
+    "BARK_KEY": "your-device-key",
+    "TELEGRAM_BOT_TOKEN": "your-bot-token",
+    "TELEGRAM_CHAT_ID": "your-chat-id",
+    "NTFY_TOPIC": "your-topic"
   }
 }
 ```
 
-详细配置说明见 [`config/notifier.example.toml`](config/notifier.example.toml)
+**配置说明**：
+
+| 环境变量                | 说明                               | 必需                 |
+| ----------------------- | ---------------------------------- | -------------------- |
+| `CLAUDE_NOTIFY_CHANNEL` | 推送渠道：`bark`/`telegram`/`ntfy` | 是（选择其一）       |
+| `BARK_KEY`              | Bark 设备密钥                      | 使用 Bark 时必需     |
+| `TELEGRAM_BOT_TOKEN`    | Telegram Bot Token                 | 使用 Telegram 时必需 |
+| `TELEGRAM_CHAT_ID`      | Telegram Chat ID                   | 使用 Telegram 时必需 |
+| `NTFY_TOPIC`            | ntfy 主题名                        | 使用 ntfy 时必需     |
+
+> **重要**：必须在 `settings.json` 中配置，而非 `~/.zshrc`。因为 Claude Code Hooks 不加载 shell 环境变量。
 
 ## 技术对比
 
