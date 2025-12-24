@@ -29,9 +29,38 @@ install: build
 	@codesign --force --deep --sign - $(INSTALL_DIR)
 	@echo "Registering with LaunchServices..."
 	@$(LSREGISTER) -f $(INSTALL_DIR)
-	@echo "Done! Run: $(INSTALL_DIR)/Contents/MacOS/$(APP_NAME)"
 	@echo ""
-	@echo "Note: First run requires notification permission in System Preferences."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "✅ 安装完成！"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo ""
+	@echo "📍 安装路径: $(INSTALL_DIR)"
+	@echo ""
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "📋 下一步操作"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo ""
+	@echo "1️⃣  测试通知（首次运行需授权通知权限）:"
+	@echo "    $(INSTALL_DIR)/Contents/MacOS/$(APP_NAME)"
+	@echo ""
+	@echo "2️⃣  配置 Claude Code Hooks（需手动配置）:"
+	@echo "    编辑 ~/.claude/settings.json，添加以下内容:"
+	@echo ""
+	@echo '    {'
+	@echo '      "hooks": {'
+	@echo '        "Stop": [{'
+	@echo '          "matcher": "",'
+	@echo '          "hooks": [{'
+	@echo '            "type": "command",'
+	@echo '            "command": "$(INSTALL_DIR)/Contents/MacOS/$(APP_NAME) -t '\''Claude Code'\'' -m '\''Claude 已完成回答'\''"'
+	@echo '          }]'
+	@echo '        }]'
+	@echo '      }'
+	@echo '    }'
+	@echo ""
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "📖 详细文档: https://github.com/zengwenliang416/claude-notifier"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 uninstall:
 	@echo "Uninstalling from $(INSTALL_DIR)..."
