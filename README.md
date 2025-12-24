@@ -113,6 +113,10 @@ claude-notifier/
 ├── README.md                    # 本文档（项目总览）
 ├── LICENSE                      # MIT 许可证
 ├── .github/workflows/           # GitHub Actions CI
+├── config/                      # 配置文件模板
+│   └── notifier.example.toml    # 多渠道推送配置示例
+├── scripts/                     # 跨平台脚本
+│   └── notify-remote.sh         # 远程推送脚本
 ├── images/                      # 文档图片（共用）
 ├── examples/                    # Hook 示例脚本（共用）
 ├── sounds/                      # 音效文件目录（共用）
@@ -138,6 +142,56 @@ claude-notifier/
     └── scripts/
         └── install.ps1
 ```
+
+## 多渠道推送（实验性）
+
+除了桌面通知，还支持推送到手机和 IM 工具：
+
+| 渠道     | 平台        | 状态    |
+| -------- | ----------- | ------- |
+| ntfy.sh  | iOS/Android | ✅ 可用 |
+| Telegram | 全平台      | ✅ 可用 |
+| Bark     | iOS         | ✅ 可用 |
+| 飞书     | 企业微信    | ✅ 可用 |
+| 钉钉     | 企业微信    | ✅ 可用 |
+| 企业微信 | 企业微信    | ✅ 可用 |
+
+### 快速体验（ntfy 推荐）
+
+```bash
+# 1. 手机安装 ntfy App（iOS/Android 均可）
+# 2. 订阅主题，如: claude-你的用户名
+
+# 3. 配置并测试
+mkdir -p ~/.config/claude-notifier
+cp config/notifier.example.toml ~/.config/claude-notifier/notifier.toml
+# 编辑配置文件，设置 [ntfy] enabled = true
+
+# 4. 测试推送
+./scripts/notify-remote.sh -t "测试" -m "推送成功！"
+```
+
+### Hook 配置（桌面+远程）
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/apps/ClaudeNotifier.app/Contents/MacOS/ClaudeNotifier -t 'Claude Code' -m 'Claude 已完成回答' && $HOME/.claude/repos/claude-notifier/scripts/notify-remote.sh -t 'Claude Code' -m 'Claude 已完成回答'"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+详细配置说明见 [`config/notifier.example.toml`](config/notifier.example.toml)
 
 ## 技术对比
 
