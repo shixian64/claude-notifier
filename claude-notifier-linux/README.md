@@ -106,6 +106,8 @@ pico2wave -w ~/.claude/sounds/done.wav "Task completed"
 
 编辑 `~/.claude/settings.json`：
 
+### 基础配置（仅完成时通知）
+
 ```json
 {
   "hooks": {
@@ -123,6 +125,46 @@ pico2wave -w ~/.claude/sounds/done.wav "Task completed"
   }
 }
 ```
+
+### 完整配置（完成 + 需要输入时通知）
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/bin/claude-notifier -t 'Claude Code' -m '✅ 任务已完成'"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/bin/claude-notifier -t 'Claude Code' -m '⏳ 需要你的输入'"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### 支持的 Hook 类型
+
+| Hook 名称 | 触发时机 |
+|-----------|----------|
+| `Stop` | Claude 完成当前回合的回答 |
+| `Notification` | 需要用户输入或确认时 |
+| `PreToolUse` | 工具执行前（可用于审批） |
+| `PostToolUse` | 工具执行后（可用于日志） |
 
 ### 带自定义音效
 
