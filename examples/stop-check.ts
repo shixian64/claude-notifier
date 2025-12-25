@@ -1,9 +1,10 @@
 #!/usr/bin/env npx tsx
 // Stop Hook: 检查任务是否真正完成
 // 防止 Claude Code 在任务未完成时提前结束
+// 支持 macOS、Windows、Linux 三个平台
 
 import { existsSync, readFileSync, accessSync, constants } from "fs";
-import { homedir } from "os";
+import { homedir, platform } from "os";
 import { join, basename } from "path";
 import { spawnSync } from "child_process";
 
@@ -32,17 +33,34 @@ function getProjectName(): string {
 }
 
 function sendNotification(): void {
-  const notifier = join(
-    homedir(),
-    ".claude/apps/ClaudeNotifier.app/Contents/MacOS/ClaudeNotifier",
-  );
-  const soundFile = join(homedir(), ".claude/sounds/done.aiff");
   const projectName = getProjectName();
   const message = `${projectName} 项目任务已完成`;
+  const home = homedir();
+  const os = platform();
+
+  let notifier: string;
+  let args: string[];
+
+  if (os === "darwin") {
+    // macOS
+    notifier = join(home, ".claude/apps/ClaudeNotifier.app/Contents/MacOS/ClaudeNotifier");
+    const soundFile = join(home, ".claude/sounds/done.aiff");
+    args = ["-t", "Claude Code", "-m", message, "-f", soundFile];
+  } else if (os === "win32") {
+    // Windows
+    notifier = join(home, ".claude/apps/claude-notifier.exe");
+    const soundFile = join(home, ".claude/sounds/done.wav");
+    args = ["-t", "Claude Code", "-m", message, "-f", soundFile];
+  } else {
+    // Linux
+    notifier = join(home, ".claude/bin/claude-notifier");
+    const soundFile = join(home, ".claude/sounds/done.wav");
+    args = ["-t", "Claude Code", "-m", message, "-f", soundFile];
+  }
 
   try {
     accessSync(notifier, constants.X_OK);
-    spawnSync(notifier, ["-t", "Claude Code", "-m", message, "-f", soundFile], {
+    spawnSync(notifier, args, {
       stdio: "ignore",
     });
   } catch {

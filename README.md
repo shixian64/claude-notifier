@@ -5,6 +5,7 @@
 <p align="center">
   <a href="claude-notifier-macos/"><img src="https://img.shields.io/badge/macOS-12.0+-blue?style=flat-square&logo=apple" alt="macOS 12.0+"/></a>
   <a href="claude-notifier-windows/"><img src="https://img.shields.io/badge/Windows-10+-0078D6?style=flat-square&logo=windows" alt="Windows 10+"/></a>
+  <a href="claude-notifier-linux/"><img src="https://img.shields.io/badge/Linux-Ubuntu%2018.04+-E95420?style=flat-square&logo=linux" alt="Linux Ubuntu 18.04+"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"/></a>
 </p>
 
@@ -34,6 +35,7 @@
 | ----------- | ------------------------------------------------------ | ----- | --------- |
 | **macOS**   | [`claude-notifier-macos/`](claude-notifier-macos/)     | Swift | ✅ 稳定   |
 | **Windows** | [`claude-notifier-windows/`](claude-notifier-windows/) | Rust  | 🚧 开发中 |
+| **Linux**   | [`claude-notifier-linux/`](claude-notifier-linux/)     | Bash  | ✅ 稳定   |
 
 ## 快速开始
 
@@ -59,6 +61,19 @@ cargo build --release
 ```
 
 详细文档：[Windows 版 README](claude-notifier-windows/README.md)
+
+### Linux
+
+```bash
+# 安装依赖 (Ubuntu/Debian)
+sudo apt install libnotify-bin imagemagick pulseaudio-utils
+
+# 安装
+cd claude-notifier-linux
+make install
+```
+
+详细文档：[Linux 版 README](claude-notifier-linux/README.md)
 
 ## Claude Code Hooks 配置
 
@@ -134,6 +149,26 @@ Hook 功能：
 }
 ```
 
+**Linux**:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/bin/claude-notifier -t 'Claude Code' -m 'Claude 已完成回答'"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
 ## 项目结构
 
 ```
@@ -152,19 +187,26 @@ claude-notifier/
 │   └── resources/
 │       ├── Info.plist
 │       └── AppIcon.icns
-└── claude-notifier-windows/     # Windows 版本
+├── claude-notifier-windows/     # Windows 版本
+│   ├── README.md
+│   ├── Cargo.toml
+│   ├── build.rs
+│   ├── src/
+│   │   ├── main.rs
+│   │   ├── cli.rs
+│   │   ├── toast.rs
+│   │   ├── sound.rs
+│   │   └── registration.rs
+│   ├── resources/
+│   └── scripts/
+│       └── install.ps1
+└── claude-notifier-linux/       # Linux 版本
     ├── README.md
-    ├── Cargo.toml
-    ├── build.rs
+    ├── Makefile
     ├── src/
-    │   ├── main.rs
-    │   ├── cli.rs
-    │   ├── toast.rs
-    │   ├── sound.rs
-    │   └── registration.rs
-    ├── resources/
-    └── scripts/
-        └── install.ps1
+    │   └── claude-notifier.sh
+    └── resources/
+        └── claude-starburst.svg
 ```
 
 ## 多渠道推送
@@ -217,13 +259,13 @@ claude-notifier/
 
 ## 技术对比
 
-| 特性     | macOS                    | Windows                  |
-| -------- | ------------------------ | ------------------------ |
-| 语言     | Swift                    | Rust                     |
-| 通知 API | UNUserNotificationCenter | ToastNotificationManager |
-| 图标机制 | App Bundle (.icns)       | AUMID + 快捷方式 (.lnk)  |
-| 音频格式 | .aiff, .wav, .caf        | 仅 .wav                  |
-| 首次运行 | 自动授权弹窗             | 需手动 `--init`          |
+| 特性     | macOS                    | Windows                  | Linux              |
+| -------- | ------------------------ | ------------------------ | ------------------ |
+| 语言     | Swift                    | Rust                     | Bash               |
+| 通知 API | UNUserNotificationCenter | ToastNotificationManager | libnotify          |
+| 图标机制 | App Bundle (.icns)       | AUMID + 快捷方式 (.lnk)  | PNG 图标           |
+| 音频格式 | .aiff, .wav, .caf        | 仅 .wav                  | .wav, .ogg, .mp3   |
+| 首次运行 | 自动授权弹窗             | 需手动 `--init`          | 无需               |
 
 ## 自定义语音音效
 
@@ -243,6 +285,16 @@ $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
 $synth.SetOutputToWaveFile("$env:USERPROFILE\.claude\sounds\done.wav")
 $synth.Speak("搞定咯")
 $synth.Dispose()
+```
+
+### Linux
+
+```bash
+# 使用 espeak + ffmpeg
+espeak -v zh '搞定咯' --stdout | ffmpeg -i - -ar 44100 ~/.claude/sounds/done.wav
+
+# 或使用 pico2wave (仅英语)
+pico2wave -w ~/.claude/sounds/done.wav "Task completed"
 ```
 
 ## License
