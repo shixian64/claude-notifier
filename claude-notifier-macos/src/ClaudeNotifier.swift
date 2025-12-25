@@ -55,9 +55,9 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
 
         completionHandler()
 
-        // 给通知系统足够时间处理，避免系统认为需要重新激活应用
+        // 短暂延迟后退出
         fputs("[DEBUG] Waiting before exit...\n", stderr)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             fputs("[DEBUG] Exiting...\n", stderr)
             NSApplication.shared.terminate(nil)
         }
@@ -335,13 +335,16 @@ private func focusHostApp(hostBundleId: String, projectPath: String?, projectNam
     }
     fputs("[DEBUG] focusHostApp: accessibility permission granted\n", stderr)
 
-    // 方法 1: 尝试 AX API（快速尝试 2 次）
+    // 方法 1: 尝试 AX API（先尝试，失败后重试）
     for attempt in 1...2 {
-        Thread.sleep(forTimeInterval: 0.2 * Double(attempt))
         let result = focusWindow(pid: app.processIdentifier, projectPath: projectPath, projectName: projectName)
         if result {
             fputs("[DEBUG] focusHostApp: AX API succeeded on attempt \(attempt)\n", stderr)
             return
+        }
+        // 仅在失败时等待后重试
+        if attempt < 2 {
+            Thread.sleep(forTimeInterval: 0.15)
         }
     }
 
