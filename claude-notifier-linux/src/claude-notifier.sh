@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 # ClaudeNotifier - Linux 桌面通知工具
 # 当 Claude Code 完成任务时发送桌面通知 + 音效提醒 + ntfy 远程推送
+# 支持点击通知跳转到指定窗口
 
 set -euo pipefail
+
+# 确保 DISPLAY 环境变量存在 (用于 X11 窗口操作)
+if [[ -z "${DISPLAY:-}" ]]; then
+    export DISPLAY=:0
+fi
 
 # 颜色定义
 GREEN='\033[0;32m'
@@ -16,6 +22,7 @@ MESSAGE="Task completed"
 SOUND_FILE=""
 NO_SOUND=false
 ICON="${HOME}/.claude/icons/claude-notifier.png"
+FOCUS_WINDOW=""  # 点击通知后要聚焦的窗口标识
 
 # ntfy 配置 (从环境变量读取)
 NTFY_TOPIC="${NTFY_TOPIC:-}"
@@ -33,6 +40,8 @@ ClaudeNotifier - Linux 桌面通知工具
   -m, --message <text>     通知消息 (默认: "Task completed")
   -f, --sound-file <path>  自定义音效文件 (.wav, .ogg, .mp3)
   --no-sound               禁用通知声音
+  -w, --focus-window <id>  点击通知后聚焦的窗口 (窗口ID，如 0x08053c6b)
+  --get-active-window      输出当前活动窗口ID后退出 (用于 Hook 配置)
   -h, --help               显示此帮助信息
 
 环境变量:
@@ -44,12 +53,37 @@ ClaudeNotifier - Linux 桌面通知工具
   claude-notifier -f ~/.claude/sounds/done.wav
   claude-notifier --no-sound -m "静默通知"
 
+  # 获取当前窗口ID (用于配置 Hook)
+  claude-notifier --get-active-window
+
+  # 点击通知后聚焦到指定窗口 (推荐使用窗口ID)
+  claude-notifier -m "任务完成" -w "0x08053c6b"
+
+  # 查看所有窗口ID
+  wmctrl -l
+
   # 启用 ntfy 推送
   NTFY_TOPIC=my-claude claude-notifier -m "任务完成"
 
 音效播放优先级: paplay > aplay > mpv > ffplay
+窗口聚焦依赖: wmctrl (sudo apt install wmctrl)
 EOF
     exit 0
+}
+
+# 获取当前活动窗口ID
+get_active_window() {
+    if command -v xdotool &>/dev/null; then
+        local win_id
+        win_id=$(xdotool getactivewindow 2>/dev/null)
+        if [[ -n "$win_id" ]]; then
+            # 转换为十六进制格式
+            printf "0x%08x\n" "$win_id"
+            exit 0
+        fi
+    fi
+    log_error "无法获取活动窗口ID，请安装 xdotool: sudo apt install xdotool"
+    exit 1
 }
 
 # 日志函数
@@ -63,6 +97,110 @@ log_warn() {
 
 log_error() {
     echo -e "${RED}[ERROR]${NC} $1" >&2
+}
+
+# 聚焦窗口
+focus_window() {
+    local window_id="$1"
+
+    if [[ -z "$window_id" ]]; then
+        return 0
+    fi
+
+    # 检查 wmctrl 是否可用
+    if ! command -v wmctrl &>/dev/null; then
+        log_warn "未找到 wmctrl，无法聚焦窗口。请安装: sudo apt install wmctrl"
+        return 0
+    fi
+
+    # 如果是十六进制窗口 ID (如 0x08053c6b)
+    if [[ "$window_id" =~ ^0x[0-9a-fA-F]+$ ]]; then
+        wmctrl -i -a "$window_id" 2>/dev/null && log_info "已聚焦窗口: $window_id" || log_warn "无法聚焦窗口: $window_id"
+    else
+        # 按窗口名称匹配
+        wmctrl -a "$window_id" 2>/dev/null && log_info "已聚焦窗口: $window_id" || log_warn "无法找到匹配的窗口: $window_id"
+    fi
+}
+
+# 使用 gdbus 发送通知并监听点击事件
+send_notification_with_action() {
+    local title="$1"
+    local message="$2"
+    local icon="$3"
+    local focus_window="$4"
+
+    # 检查 gdbus 是否可用
+    if ! command -v gdbus &>/dev/null; then
+        log_warn "未找到 gdbus，回退到 notify-send"
+        send_notification "$title" "$message" "$icon"
+        return
+    fi
+
+    # 检查 wmctrl 是否可用
+    if ! command -v wmctrl &>/dev/null; then
+        log_warn "未找到 wmctrl，无法聚焦窗口。请安装: sudo apt install wmctrl"
+        send_notification "$title" "$message" "$icon"
+        return
+    fi
+
+    # 构建图标路径
+    local icon_path=""
+    if [[ -f "$icon" ]]; then
+        icon_path="$icon"
+    fi
+
+    # 使用 gdbus 发送通知
+    # - resident: true 让通知持久显示
+    # - urgency: 2 (critical) 确保通知不会自动消失
+    # - timeout: 0 表示不自动消失
+    local result
+    result=$(gdbus call --session \
+        --dest org.freedesktop.Notifications \
+        --object-path /org/freedesktop/Notifications \
+        --method org.freedesktop.Notifications.Notify \
+        "Claude Code" \
+        0 \
+        "$icon_path" \
+        "$title" \
+        "$message" \
+        '["default", "查看"]' \
+        '{"resident": <true>, "urgency": <byte 2>}' \
+        0 2>&1)
+
+    # 提取通知 ID
+    local notification_id
+    notification_id=$(echo "$result" | grep -oP 'uint32 \K\d+')
+
+    if [[ -z "$notification_id" ]]; then
+        log_warn "gdbus 发送通知失败，回退到 notify-send"
+        send_notification "$title" "$message" "$icon"
+        return
+    fi
+
+    log_info "通知已发送 (ID: $notification_id)"
+
+    # 启动后台监听进程
+    (
+        # 监听 ActionInvoked 信号 (用户点击通知)
+        timeout 60 gdbus monitor --session \
+            --dest org.freedesktop.Notifications \
+            --object-path /org/freedesktop/Notifications 2>/dev/null | \
+        while IFS= read -r line; do
+            # 检查是否是我们的通知被点击
+            if [[ "$line" == *"ActionInvoked"* && "$line" == *"uint32 $notification_id"* ]]; then
+                # 使用窗口ID精确聚焦
+                wmctrl -i -a "$focus_window" 2>/dev/null
+                # 关闭通知
+                gdbus call --session \
+                    --dest org.freedesktop.Notifications \
+                    --object-path /org/freedesktop/Notifications \
+                    --method org.freedesktop.Notifications.CloseNotification \
+                    "$notification_id" &>/dev/null
+                break
+            fi
+        done
+    ) &>/dev/null &
+    disown
 }
 
 # 播放音效
@@ -169,6 +307,13 @@ parse_args() {
                 NO_SOUND=true
                 shift
                 ;;
+            -w|--focus-window)
+                FOCUS_WINDOW="$2"
+                shift 2
+                ;;
+            --get-active-window)
+                get_active_window
+                ;;
             -h|--help)
                 show_help
                 ;;
@@ -185,7 +330,13 @@ main() {
     parse_args "$@"
 
     # 发送桌面通知
-    send_notification "$TITLE" "$MESSAGE" "$ICON"
+    if [[ -n "$FOCUS_WINDOW" ]]; then
+        # 使用 gdbus 发送通知，支持点击聚焦
+        send_notification_with_action "$TITLE" "$MESSAGE" "$ICON" "$FOCUS_WINDOW"
+    else
+        # 使用普通 notify-send
+        send_notification "$TITLE" "$MESSAGE" "$ICON"
+    fi
 
     # 发送 ntfy 远程推送
     send_ntfy "$TITLE" "$MESSAGE"

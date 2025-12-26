@@ -1,6 +1,6 @@
 # Claude Notifier (Linux)
 
-Linux 原生桌面通知工具，当 Claude Code 完成任务时发送桌面通知 + 音效提醒。
+Linux 原生桌面通知工具，当 Claude Code 完成任务时发送桌面通知 + 音效提醒。**支持点击通知跳转到项目窗口。**
 
 ## 系统要求
 
@@ -8,6 +8,7 @@ Linux 原生桌面通知工具，当 Claude Code 完成任务时发送桌面通�
 - libnotify (`notify-send`)
 - ImageMagick (`convert`) - 用于安装时转换图标
 - 音频播放器 (任选其一): PulseAudio (`paplay`), ALSA (`aplay`), mpv, ffplay
+- wmctrl + xdotool - 用于点击通知跳转窗口 (可选)
 
 ## 快速开始
 
@@ -15,17 +16,17 @@ Linux 原生桌面通知工具，当 Claude Code 完成任务时发送桌面通�
 
 **Ubuntu/Debian:**
 ```bash
-sudo apt install libnotify-bin imagemagick pulseaudio-utils
+sudo apt install libnotify-bin imagemagick pulseaudio-utils wmctrl xdotool
 ```
 
 **Fedora:**
 ```bash
-sudo dnf install libnotify ImageMagick pulseaudio-utils
+sudo dnf install libnotify ImageMagick pulseaudio-utils wmctrl xdotool
 ```
 
 **Arch:**
 ```bash
-sudo pacman -S libnotify imagemagick pulseaudio
+sudo pacman -S libnotify imagemagick pulseaudio wmctrl xdotool
 ```
 
 ### 2. 安装
@@ -64,13 +65,15 @@ claude-notifier -t "静默通知" -m "无声音" --no-sound
 
 ## 参数说明
 
-| 参数               | 说明               | 默认值           |
-| ------------------ | ------------------ | ---------------- |
-| `-t, --title`      | 通知标题           | "Claude Code"    |
-| `-m, --message`    | 通知消息           | "Task completed" |
-| `-f, --sound-file` | 自定义音效文件路径 | -                |
-| `--no-sound`       | 禁用通知声音       | -                |
-| `-h, --help`       | 显示帮助信息       | -                |
+| 参数                  | 说明                         | 默认值           |
+| --------------------- | ---------------------------- | ---------------- |
+| `-t, --title`         | 通知标题                     | "Claude Code"    |
+| `-m, --message`       | 通知消息                     | "Task completed" |
+| `-f, --sound-file`    | 自定义音效文件路径           | -                |
+| `--no-sound`          | 禁用通知声音                 | -                |
+| `-w, --focus-window`  | 点击通知后聚焦的窗口ID       | -                |
+| `--get-active-window` | 输出当前活动窗口ID后退出     | -                |
+| `-h, --help`          | 显示帮助信息                 | -                |
 
 ## 自定义语音音效
 
@@ -106,7 +109,54 @@ pico2wave -w ~/.claude/sounds/done.wav "Task completed"
 
 编辑 `~/.claude/settings.json`：
 
-### 基础配置（仅完成时通知）
+### 推荐配置（支持点击跳转到项目窗口）
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/bin/claude-notifier --get-active-window > /tmp/claude-window-id.txt"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/bin/claude-notifier -t 'Claude Code' -m '✅ 任务已完成' -w \"$(cat /tmp/claude-window-id.txt 2>/dev/null)\""
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/bin/claude-notifier -t 'Claude Code' -m '⏳ 需要你的输入' -w \"$(cat /tmp/claude-window-id.txt 2>/dev/null)\""
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**工作原理：**
+1. `SessionStart` Hook 在 Claude Code 启动时记录当前终端窗口 ID
+2. `Stop`/`Notification` Hook 发送通知时读取保存的窗口 ID
+3. 点击通知后精确跳转到该终端窗口
+
+### 基础配置（仅通知，无跳转）
 
 ```json
 {
@@ -188,9 +238,10 @@ pico2wave -w ~/.claude/sounds/done.wav "Task completed"
 
 ## 技术细节
 
-- **通知 API**: libnotify (`notify-send`)
+- **通知 API**: libnotify (`notify-send`) / gdbus (支持点击回调)
 - **图标**: Claude 星芒图标 (SVG → PNG 128x128)
 - **音频播放**: 按优先级尝试 paplay → aplay → mpv → ffplay
+- **窗口聚焦**: wmctrl + xdotool
 - **安装目录**: `~/.claude/bin/claude-notifier`
 - **图标目录**: `~/.claude/icons/claude-notifier.png`
 
@@ -212,12 +263,14 @@ make uninstall
 
 ## 常见问题
 
-| 问题             | 解决方案                                          |
-| ---------------- | ------------------------------------------------- |
-| 通知不显示       | 确认已安装 libnotify-bin，检查桌面环境通知设置    |
-| 图标不显示       | 确认 ~/.claude/icons/claude-notifier.png 存在     |
-| 音效不播放       | 确认已安装 paplay/aplay/mpv，检查 PulseAudio 状态 |
-| 权限被拒绝       | 运行 `chmod +x ~/.claude/bin/claude-notifier`     |
+| 问题                 | 解决方案                                          |
+| -------------------- | ------------------------------------------------- |
+| 通知不显示           | 确认已安装 libnotify-bin，检查桌面环境通知设置    |
+| 图标不显示           | 确认 ~/.claude/icons/claude-notifier.png 存在     |
+| 音效不播放           | 确认已安装 paplay/aplay/mpv，检查 PulseAudio 状态 |
+| 权限被拒绝           | 运行 `chmod +x ~/.claude/bin/claude-notifier`     |
+| 点击通知无法跳转     | 确认已安装 wmctrl 和 xdotool                      |
+| 跳转到错误的终端窗口 | 使用 `--get-active-window` 获取精确窗口 ID        |
 
 ## License
 
