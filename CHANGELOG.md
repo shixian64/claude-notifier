@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **任务状态区分**：新增 `--status` 参数支持 success/failure/warning
+  - 失败时标题前缀 ❌，警告时前缀 ⚠️
+  - 失败状态自动使用 Basso 声音（更明显的警告音）
+- **通知摘要增强**：
+  - `--subtitle` 参数：显示副标题（简短摘要）
+  - `--duration` 参数：自动格式化耗时（如 120 秒 → "2m"）
+- **结构化历史记录**：JSONL 格式记录到 `~/.claude/notifier-history.jsonl`
+  - 包含时间戳、PID、标题、消息、项目信息、状态、耗时等字段
+  - 支持 jq 查询和分析
 - **点击跳转功能**：点击通知自动跳转到对应项目窗口
   - 支持 Zed、VS Code、Cursor 等主流编辑器
   - 智能窗口匹配：基于项目路径和名称的加权评分系统

@@ -78,6 +78,22 @@ make install
 | `--project-name`   | 项目文件夹名称                  | `myproject`            |
 | `--tty`            | 终端 TTY 路径（保留，暂未使用） | `/dev/ttys003`         |
 
+### 任务状态与摘要参数
+
+| 参数         | 说明                               | 示例                |
+| ------------ | ---------------------------------- | ------------------- |
+| `--status`   | 任务状态 (success/failure/warning) | `failure`           |
+| `--subtitle` | 通知副标题（简短摘要）             | `"修改了 5 个文件"` |
+| `--duration` | 任务耗时（秒，自动格式化）         | `120` → 显示 "2m"   |
+
+**状态效果**：
+
+| 状态      | 标题前缀 | 声音                           |
+| --------- | -------- | ------------------------------ |
+| `success` | （无）   | 默认 Glass                     |
+| `failure` | ❌       | 默认改为 Basso（更明显警告音） |
+| `warning` | ⚠️       | 默认 Glass                     |
+
 **支持的 Bundle ID**：
 
 | 应用      | Bundle ID                       |
@@ -329,6 +345,36 @@ codesign --force --deep --sign - /Applications/ClaudeNotifier.app
 
 > **注意**：安装到 `/Applications` 需要管理员权限，可使用 `sudo` 或改用 `~/Applications`。
 
+## 历史记录
+
+ClaudeNotifier 自动记录所有通知到 JSONL 格式的历史文件：
+
+**文件位置**：`~/.claude/notifier-history.jsonl`
+
+**记录字段**：
+
+| 字段          | 说明           |
+| ------------- | -------------- |
+| `timestamp`   | ISO8601 时间戳 |
+| `pid`         | 进程 ID        |
+| `title`       | 通知标题       |
+| `message`     | 通知消息       |
+| `projectPath` | 项目路径       |
+| `projectName` | 项目名称       |
+| `status`      | 任务状态       |
+| `subtitle`    | 副标题         |
+| `duration`    | 耗时（秒）     |
+
+**查看历史**：
+
+```bash
+# 查看最近 10 条记录
+tail -10 ~/.claude/notifier-history.jsonl | jq .
+
+# 筛选失败记录
+cat ~/.claude/notifier-history.jsonl | jq 'select(.status == "failure")'
+```
+
 ## 技术细节
 
 - **通知 API**: `UNUserNotificationCenter`（Apple 官方通知 API）
@@ -339,6 +385,7 @@ codesign --force --deep --sign - /Applications/ClaudeNotifier.app
 - **后台运行**: `LSUIElement=true`（不显示 Dock 图标）
 - **激活策略**: `.accessory`（隐藏 Dock 图标，仅接收事件）
 - **超时机制**: 60 秒无点击自动退出
+- **历史记录**: JSONL 格式追加写入 `~/.claude/notifier-history.jsonl`
 - **最低系统**: macOS 12.0+
 
 ## 卸载

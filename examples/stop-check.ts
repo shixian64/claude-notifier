@@ -1,5 +1,12 @@
 #!/usr/bin/env npx tsx
 // Stop Hook: 检查任务是否真正完成 + 发送通知
+//
+// 功能：
+//   - 检查 TodoList 是否全部完成
+//   - 发送桌面通知（支持 --status, --subtitle, --duration 参数）
+//   - 发送远程推送（ntfy/Telegram/Bark）
+//   - 点击通知跳转到项目窗口
+//
 // 配置方式：环境变量
 //   CLAUDE_NOTIFY_CHANNEL: telegram | ntfy | bark (可选)
 //   Telegram: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
@@ -152,8 +159,17 @@ async function sendBark(title: string, message: string): Promise<void> {
   );
 }
 
+interface NotificationOptions {
+  status?: "success" | "failure" | "warning";
+  subtitle?: string;
+  duration?: number;
+}
+
 // 桌面通知（支持点击跳转到项目窗口）
-function sendDesktopNotification(projectName: string): Promise<void> {
+function sendDesktopNotification(
+  projectName: string,
+  options: NotificationOptions = {},
+): Promise<void> {
   return new Promise((resolve) => {
     const userNotifier = join(
       homedir(),
@@ -184,6 +200,17 @@ function sendDesktopNotification(projectName: string): Promise<void> {
       }
       if (tty) {
         args.push("--tty", tty);
+      }
+
+      // 添加状态和摘要参数
+      if (options.status) {
+        args.push("--status", options.status);
+      }
+      if (options.subtitle) {
+        args.push("--subtitle", options.subtitle);
+      }
+      if (options.duration !== undefined) {
+        args.push("--duration", String(options.duration));
       }
 
       const proc = spawn(notifier, args, { stdio: "ignore", detached: true });
@@ -219,10 +246,12 @@ async function sendRemoteNotification(projectName: string): Promise<void> {
 }
 
 // 并行发送通知
-async function sendNotification(): Promise<void> {
+async function sendNotification(
+  options: NotificationOptions = {},
+): Promise<void> {
   const projectName = getProjectName();
   await Promise.all([
-    sendDesktopNotification(projectName),
+    sendDesktopNotification(projectName, options),
     sendRemoteNotification(projectName).catch((e) => {
       logWarn(`远程推送失败: ${e}`);
     }),
@@ -277,7 +306,7 @@ async function main(): Promise<void> {
   console.log(JSON.stringify({ decision: "approve" }));
 
   try {
-    await sendNotification();
+    await sendNotification({ status: "success" });
     logInfo("通知发送完成");
   } catch (e) {
     logWarn(`通知发送失败: ${e}`);

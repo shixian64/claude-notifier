@@ -9,6 +9,9 @@ private enum NotificationUserInfoKey {
     static let projectName = "projectName"
     static let hostBundleId = "hostBundleId"
     static let tty = "tty"
+    static let status = "status"
+    static let subtitle = "subtitle"
+    static let duration = "duration"
 }
 
 final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
@@ -580,7 +583,14 @@ func installCustomSound(from path: String) -> String? {
     return sourceURL.deletingPathExtension().lastPathComponent
 }
 
-func sendNotification(title: String, message: String, sound: String?, soundFile: String?, userInfo: [AnyHashable: Any]) {
+func formatDuration(_ seconds: Int) -> String {
+    if seconds < 60 { return "\(seconds)s" }
+    let m = seconds / 60
+    let s = seconds % 60
+    return s > 0 ? "\(m)m \(s)s" : "\(m)m"
+}
+
+func sendNotification(title: String, message: String, sound: String?, soundFile: String?, userInfo: [AnyHashable: Any], status: String? = nil, subtitle: String? = nil, duration: Int? = nil) {
     let center = UNUserNotificationCenter.current()
 
     let semaphore = DispatchSemaphore(value: 0)
@@ -591,6 +601,25 @@ func sendNotification(title: String, message: String, sound: String?, soundFile:
         if let installed = installCustomSound(from: file) {
             effectiveSoundName = installed
         }
+    }
+
+    // 失败状态使用更明显的警告音
+    if status == "failure" && effectiveSoundName == "Glass" {
+        effectiveSoundName = "Basso"
+    }
+
+    // 状态前缀
+    let statusPrefix: String
+    switch status {
+    case "failure": statusPrefix = "❌ "
+    case "warning": statusPrefix = "⚠️ "
+    default: statusPrefix = ""
+    }
+
+    // 格式化消息（追加耗时）
+    var formattedMessage = message
+    if let duration {
+        formattedMessage += " (\(formatDuration(duration)))"
     }
 
     center.requestAuthorization(options: [.alert, .sound]) { granted, error in
@@ -607,8 +636,11 @@ func sendNotification(title: String, message: String, sound: String?, soundFile:
         }
 
         let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = message
+        content.title = statusPrefix + title
+        content.body = formattedMessage
+        if let subtitle {
+            content.subtitle = subtitle
+        }
         content.userInfo = userInfo
         // 仅当 effectiveSoundName 非 nil 时才设置声音（支持 --no-sound 静音）
         if let soundName = effectiveSoundName {
@@ -650,6 +682,28 @@ func logToFile(_ message: String) {
     }
 }
 
+// JSONL 格式历史记录
+let historyFile = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/notifier-history.jsonl")
+func logNotificationToHistory(_ entry: [String: Any]) {
+    guard let jsonData = try? JSONSerialization.data(withJSONObject: entry),
+          var jsonString = String(data: jsonData, encoding: .utf8) else {
+        return
+    }
+    jsonString += "\n"
+
+    if let data = jsonString.data(using: .utf8) {
+        if FileManager.default.fileExists(atPath: historyFile.path) {
+            if let handle = try? FileHandle(forWritingTo: historyFile) {
+                handle.seekToEndOfFile()
+                handle.write(data)
+                handle.closeFile()
+            }
+        } else {
+            try? data.write(to: historyFile)
+        }
+    }
+}
+
 logToFile("=== ClaudeNotifier starting ===")
 logToFile("PID: \(ProcessInfo.processInfo.processIdentifier)")
 logToFile("Args: \(CommandLine.arguments)")
@@ -671,6 +725,9 @@ let recognizedOptions: Set<String> = [
     "--project-name",
     "--host-bundle-id",
     "--tty",
+    "--status",
+    "--subtitle",
+    "--duration",
 ]
 
 let rawArgs = Array(CommandLine.arguments.dropFirst())
@@ -698,6 +755,9 @@ var projectPath: String? = nil
 var projectName: String? = nil
 var hostBundleId: String? = nil
 var tty: String? = nil
+var status: String? = nil
+var subtitle: String? = nil
+var duration: Int? = nil
 
 var args = ArraySlice(rawArgs)
 while let arg = args.popFirst() {
@@ -724,6 +784,12 @@ while let arg = args.popFirst() {
         if let val = args.popFirst() { hostBundleId = val }
     case "--tty":
         if let val = args.popFirst() { tty = val }
+    case "--status":
+        if let val = args.popFirst() { status = val.lowercased() }
+    case "--subtitle":
+        if let val = args.popFirst() { subtitle = val }
+    case "--duration":
+        if let val = args.popFirst() { duration = Int(val) }
     case "-h", "--help":
         print("""
         ClaudeNotifier - Send macOS notifications with Claude icon
@@ -739,6 +805,9 @@ while let arg = args.popFirst() {
           --project-name <name>    Project folder name
           --host-bundle-id <id>    Host app bundle ID (e.g., dev.zed.Zed)
           --tty <tty>              Terminal tty path (e.g., /dev/ttys003)
+          --status <status>        Task status: success, failure, warning
+          --subtitle <text>        Notification subtitle (short summary)
+          --duration <seconds>     Task duration in seconds (auto-formatted)
           --no-sound               Disable notification sound
           -h, --help               Show this help
 
@@ -765,8 +834,26 @@ if let projectPath, !projectPath.isEmpty { userInfo[NotificationUserInfoKey.proj
 if let projectName, !projectName.isEmpty { userInfo[NotificationUserInfoKey.projectName] = projectName }
 if let hostBundleId, !hostBundleId.isEmpty { userInfo[NotificationUserInfoKey.hostBundleId] = hostBundleId }
 if let tty, !tty.isEmpty { userInfo[NotificationUserInfoKey.tty] = tty }
+if let status, !status.isEmpty { userInfo[NotificationUserInfoKey.status] = status }
+if let subtitle, !subtitle.isEmpty { userInfo[NotificationUserInfoKey.subtitle] = subtitle }
+if let duration { userInfo[NotificationUserInfoKey.duration] = duration }
 
-sendNotification(title: title, message: message, sound: sound, soundFile: soundFile, userInfo: userInfo)
+// 记录到 JSONL 历史
+var historyEntry: [String: Any] = [
+    "timestamp": ISO8601DateFormatter().string(from: Date()),
+    "pid": ProcessInfo.processInfo.processIdentifier,
+    "title": title,
+    "message": message,
+]
+if let projectPath { historyEntry["projectPath"] = projectPath }
+if let projectName { historyEntry["projectName"] = projectName }
+if let hostBundleId { historyEntry["hostBundleId"] = hostBundleId }
+if let status { historyEntry["status"] = status }
+if let subtitle { historyEntry["subtitle"] = subtitle }
+if let duration { historyEntry["duration"] = duration }
+logNotificationToHistory(historyEntry)
+
+sendNotification(title: title, message: message, sound: sound, soundFile: soundFile, userInfo: userInfo, status: status, subtitle: subtitle, duration: duration)
 
 // 如果有焦点跳转参数，使用 NSApplication 事件循环等待用户点击
 // 只有 NSApplication.run() 才能正确接收通知点击回调
