@@ -23,6 +23,7 @@ SOUND_FILE=""
 NO_SOUND=false
 ICON="${HOME}/.claude/icons/claude-notifier.png"
 FOCUS_WINDOW=""  # 点击通知后要聚焦的窗口标识
+NOTIFICATION_ID_FILE="${HOME}/.claude/.notification_id"  # 保存上一次通知 ID
 
 # ntfy 配置 (从环境变量读取)
 NTFY_TOPIC="${NTFY_TOPIC:-}"
@@ -122,6 +123,21 @@ focus_window() {
     fi
 }
 
+# 获取上一次通知的 ID (用于替换累积通知)
+get_last_notification_id() {
+    if [[ -f "$NOTIFICATION_ID_FILE" ]]; then
+        cat "$NOTIFICATION_ID_FILE" 2>/dev/null || echo "0"
+    else
+        echo "0"
+    fi
+}
+
+# 保存通知 ID
+save_notification_id() {
+    local id="$1"
+    echo "$id" > "$NOTIFICATION_ID_FILE" 2>/dev/null
+}
+
 # 使用 gdbus 发送通知并监听点击事件
 send_notification_with_action() {
     local title="$1"
@@ -149,7 +165,12 @@ send_notification_with_action() {
         icon_path="$icon"
     fi
 
+    # 获取上一次通知 ID，用于替换累积通知（避免通知堆积）
+    local replaces_id
+    replaces_id=$(get_last_notification_id)
+
     # 使用 gdbus 发送通知
+    # - replaces_id: 使用上次通知 ID，新通知会替换旧通知
     # - resident: true 让通知持久显示
     # - urgency: 2 (critical) 确保通知不会自动消失
     # - timeout: 0 表示不自动消失
@@ -159,7 +180,7 @@ send_notification_with_action() {
         --object-path /org/freedesktop/Notifications \
         --method org.freedesktop.Notifications.Notify \
         "Claude Code" \
-        0 \
+        "$replaces_id" \
         "$icon_path" \
         "$title" \
         "$message" \
@@ -177,7 +198,10 @@ send_notification_with_action() {
         return
     fi
 
-    log_info "通知已发送 (ID: $notification_id)"
+    # 保存通知 ID，下次发送时会替换此通知（避免通知堆积）
+    save_notification_id "$notification_id"
+
+    log_info "通知已发送 (ID: $notification_id, 替换: $replaces_id)"
 
     # 启动后台监听进程
     (
@@ -238,7 +262,41 @@ send_notification() {
     local message="$2"
     local icon="$3"
 
-    # 检查 notify-send 是否可用
+    # 优先使用 gdbus（支持替换通知，避免堆积）
+    if command -v gdbus &>/dev/null; then
+        local icon_path=""
+        if [[ -f "$icon" ]]; then
+            icon_path="$icon"
+        fi
+
+        # 获取上一次通知 ID，用于替换累积通知
+        local replaces_id
+        replaces_id=$(get_last_notification_id)
+
+        local result
+        result=$(gdbus call --session \
+            --dest org.freedesktop.Notifications \
+            --object-path /org/freedesktop/Notifications \
+            --method org.freedesktop.Notifications.Notify \
+            "Claude Code" \
+            "$replaces_id" \
+            "$icon_path" \
+            "$title" \
+            "$message" \
+            '[]' \
+            '{}' \
+            5000 2>&1)
+
+        # 提取并保存通知 ID
+        local notification_id
+        notification_id=$(echo "$result" | grep -oP 'uint32 \K\d+')
+        if [[ -n "$notification_id" ]]; then
+            save_notification_id "$notification_id"
+            return
+        fi
+    fi
+
+    # 回退到 notify-send
     if ! command -v notify-send &>/dev/null; then
         log_error "未找到 notify-send，请安装 libnotify-bin"
         log_error "  Ubuntu/Debian: sudo apt install libnotify-bin"
