@@ -104,6 +104,10 @@ Hook 功能：
 - 发送远程推送（ntfy/Telegram/Bark，只启用一个）
 - 桌面和远程通知并行执行，不阻塞
 - **显示项目名称**：通知会显示当前项目名（如「pay 项目任务已完成」），方便多项目并行时区分
+- **点击跳转**：点击通知自动跳转到对应项目窗口（支持 Zed/VS Code/Cursor 等）
+- **任务状态**：支持成功/失败/警告状态区分（`--status`）
+- **摘要信息**：支持副标题和耗时显示（`--subtitle`、`--duration`）
+- **历史记录**：所有通知自动记录到 JSONL 文件
 
 ### 仅桌面通知（简化版）
 
@@ -120,13 +124,25 @@ Hook 功能：
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/.claude/apps/ClaudeNotifier.app/Contents/MacOS/ClaudeNotifier -t 'Claude Code' -m 'Claude 已完成回答'"
+            "command": "/Applications/ClaudeNotifier.app/Contents/MacOS/ClaudeNotifier -t 'Claude Code' -m 'Claude 已完成回答'"
           }
         ]
       }
     ]
   }
 }
+```
+
+**带状态和摘要的完整示例**：
+
+```bash
+# Hook 脚本中可以根据任务结果动态设置参数
+/Applications/ClaudeNotifier.app/Contents/MacOS/ClaudeNotifier \
+  -t "Claude Code" \
+  -m "重构完成" \
+  --status success \
+  --subtitle "修改了 5 个文件" \
+  --duration 180
 ```
 
 **Windows**:
@@ -257,6 +273,62 @@ claude-notifier/
 
 > **重要**：必须在 `settings.json` 中配置，而非 `~/.zshrc`。因为 Claude Code Hooks 不加载 shell 环境变量。
 
+## 高级功能
+
+### 任务状态区分
+
+通过 `--status` 参数区分任务结果，失败时使用不同的视觉和声音提示：
+
+```bash
+# 成功（默认）
+ClaudeNotifier -t "Claude Code" -m "任务完成"
+
+# 失败（标题前缀 ❌，使用 Basso 警告音）
+ClaudeNotifier -t "Claude Code" -m "构建失败" --status failure
+
+# 警告（标题前缀 ⚠️）
+ClaudeNotifier -t "Claude Code" -m "有 3 个警告" --status warning
+```
+
+### 通知摘要增强
+
+使用 `--subtitle` 和 `--duration` 参数提供更丰富的通知信息：
+
+```bash
+# 带副标题和耗时
+ClaudeNotifier -t "Claude Code" -m "重构完成" \
+  --subtitle "修改了 5 个文件" \
+  --duration 120  # 自动格式化为 "2m"
+```
+
+### 结构化历史记录
+
+所有通知自动记录到 `~/.claude/notifier-history.jsonl`（JSONL 格式）：
+
+```bash
+# 查看最近 5 条记录
+tail -5 ~/.claude/notifier-history.jsonl | jq .
+
+# 查询失败的任务
+cat ~/.claude/notifier-history.jsonl | jq 'select(.status == "failure")'
+
+# 统计今日通知数
+cat ~/.claude/notifier-history.jsonl | jq -s '[.[] | select(.timestamp | startswith("2025-01-01"))] | length'
+```
+
+**记录字段**：
+
+| 字段        | 说明                          |
+| ----------- | ----------------------------- |
+| `timestamp` | ISO8601 时间戳                |
+| `pid`       | 进程 ID                       |
+| `title`     | 通知标题                      |
+| `message`   | 通知内容                      |
+| `project`   | 项目路径（如有）              |
+| `status`    | 状态：success/failure/warning |
+| `subtitle`  | 副标题（如有）                |
+| `duration`  | 耗时秒数（如有）              |
+
 ## 技术对比
 
 | 特性     | macOS                    | Windows                  | Linux              |
@@ -266,6 +338,9 @@ claude-notifier/
 | 图标机制 | App Bundle (.icns)       | AUMID + 快捷方式 (.lnk)  | PNG 图标           |
 | 音频格式 | .aiff, .wav, .caf        | 仅 .wav                  | .wav, .ogg, .mp3   |
 | 首次运行 | 自动授权弹窗             | 需手动 `--init`          | 无需               |
+| 点击跳转 | ✅ 支持（AX API + CLI）  | 🔧 开发中                | 🔧 开发中          |
+| 任务状态 | ✅ 支持                  | 🔧 开发中                | 🔧 开发中          |
+| 历史记录 | ✅ JSONL                 | 🔧 开发中                | 🔧 开发中          |
 
 ## 自定义语音音效
 
